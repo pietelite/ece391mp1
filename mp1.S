@@ -322,7 +322,12 @@ draw_base:
 
 		movl 12(%ebp), %ecx   				# Load pointer
 		movb (%ecx, %edx, 1), %cl			# Get correct char from string
+
+		pushl %eax
+		pushl %edx
 		call mp1_poke									# Draw
+		popl %edx
+		popl %eax
 
 		addl $2, %eax 			# Increase offset by 2 bytes, to next square
 		incl %edx
