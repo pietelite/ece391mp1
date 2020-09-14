@@ -15,7 +15,7 @@
 	DEST_X	  = 20
 	DEST_Y	  = 24
 	EXPLODED  = 28
-	C	  = 32
+	MISSILE_CHAR	  = 32
 
 
 
@@ -71,8 +71,8 @@ crosshairs_y:		.long 0x0	# Y-position of the crosshairs
 # Registers: Clobbers EDX
 
 mp1_poke:
-	movl    vmem_base_addr(,1),%ecx
-	movb    %cl,(%ecx,%eax,1)
+	movl    vmem_base_addr(,1),%edx
+	movb    %cl,(%edx,%eax,1)
 	ret
 
 #   ----------------- Exported functions ---------------------
@@ -140,41 +140,44 @@ update_missiles:
 	pushl %ebp
 	movl %ebp, %esp
 
-	movl mp1_missile_list, %ecx  	# hold "current" missile in ecx
+	movl mp1_missile_list, %edx  	# hold "current" missile in ecx
 
 	# Walk down struct missile linked list
 	update_missile_loop:
 		# Check if we're done by checking if missile list is null pointer
-		testl %ecx, %ecx
+		testl %edx, %edx
 		jz update_missile_loop_done
 
 		# Erase the missile in the current location
-		pushl %ecx
+		pushl %edx
 		call get_missile_location 		# eax now holds the location of missile
-		popl %ecx
+		popl %edx
 		movb $EMPTY, %cl							# enter a blank space
-		call mp1_poke
 
-		cmpl $0, EXPLODED(%ecx)		# Are we exploding?
+		pushl %edx								# Make sure to save ecx
+		call mp1_poke
+		popl %edx
+
+		cmpl $0, EXPLODED(%edx)		# Are we exploding?
 		jne skip_update_xy 				# Jump if not 0, because we're exploding
 
 		# Not exploding
-		movl VX(%ecx), %eax				# Move velocity
-		addl %eax, X(%ecx)				# Add to x component
-		movl VY(%ecx), %eax				# Same with y
-		addl %eax, Y(%ecx)
+		movl VX(%edx), %eax				# Move velocity
+		addl %eax, X(%edx)				# Add to x component
+		movl VY(%edx), %eax				# Same with y
+		addl %eax, Y(%edx)
 
 		skip_update_xy:
 
 		# Three cases processing...
 		# 1. If moved out of range call mp1_missile_remove
-		movl X(%ecx), %eax					# Move X component into eax
+		movl X(%edx), %eax					# Move X component into eax
 		shrl $XY_BIT_OFFSET, %eax		# Shift so we're using just upper 16 bits
 		cmpl $X_MIN, %eax						# Are we below bounds?
 		jl remove_this_missile
 		cmpl $X_MAX, %eax						# Are we above bounds?
 		jg remove_this_missile
-		movl Y(%ecx), %eax 					# Move Y component into eax
+		movl Y(%edx), %eax 					# Move Y component into eax
 		shrl $XY_BIT_OFFSET, %eax		# Shift so we're using just upper 16 bits
 		cmpl $Y_MIN, %eax						# Are we below bounds?
 		jl remove_this_missile
@@ -184,59 +187,67 @@ update_missiles:
 		# We're in bounds!
 
 	  # 2. Check if reached destination...
-		movl X(%ecx), %eax					# Move x into eax and get correct bits
+		movl X(%edx), %eax					# Move x into eax and get correct bits
 		shrl $16, %eax
-		cmpl %eax, DEST_X(%ecx)			# If these aren't equal, we're not there
+		cmpl %eax, DEST_X(%edx)			# If these aren't equal, we're not there
 		jne not_at_destination
-		movl Y(%ecx), %eax					# Move y into eax and get correct bits
+		movl Y(%edx), %eax					# Move y into eax and get correct bits
 		shrl $16, %eax
-		cmpl %eax, DEST_Y(%ecx)			# If these aren't equal, we're not there
+		cmpl %eax, DEST_Y(%edx)			# If these aren't equal, we're not there
 		jne not_at_destination
 
 		# 	We're there! Call missile_explode with a pointer to the missile
 		#   struct as an argument
-		pushl %ecx
+		pushl %edx
 		call missile_explode 						# eax now has result of explosion
-		popl %ecx
+		popl %edx
 
 		cmpl $0, %eax 									# inform user if changes were made
 		je nothing_hit
+		pushl %edx											# Preserve edx
 		call mp1_notify_user
+		popl %edx
 		nothing_hit:
 
-		decl EXPLODED(%ecx)
-		cmpl $0, EXPLODED(%ecx)					# If we're done exploding now,
+		decl EXPLODED(%edx)
+		cmpl $0, EXPLODED(%edx)					# If we're done exploding now,
 																		# we can remove and continue
 		je remove_this_missile
 
 		# 	Finally, draw explosion character
-		pushl %ecx
+		pushl %edx
 		call get_missile_location
-		popl %ecx
+		popl %edx
+
 		movb $EXPLOSION, %cl
+		pushl %edx											# Make sure to save ecx
 		call mp1_poke
+		popl %edx
 		jmp update_missile_loop_continue
 
 		not_at_destination:
 		# 3. Otherwise (simply still moving to its destination)...
 		#   Draw the missile character
-		pushl %ecx
+		pushl %edx
 		call get_missile_location
-		popl %ecx
-		movb C(%ecx), %cl
+		popl %edx
+		movb MISSILE_CHAR(%edx), %cl
+		pushl %edx										# Make sure to save ecx
 		call mp1_poke
+		popl %edx
 
 		# TWO CONTINUE CASES:
 		# 1.
 		update_missile_loop_continue:
-		movl NEXT(%ecx), %ecx					# Loads next missile
+		movl NEXT(%edx), %edx						# Loads next missile
 		jmp update_missile_loop
 
 		# 2.
 		remove_this_missile:
-		pushl %ecx
+		pushl %edx
 		call mp1_missile_remove
-		movl %eax, %ecx 							# Loads the next missile into the loop
+		popl %edx
+		movl %eax, %edx 							# Loads the next missile into the loop
 																	# (mp1_missile_remove gives me next)
 		jmp update_missile_loop
 
@@ -256,10 +267,10 @@ draw_bases:
 
 	# Draw the bases
 	# Put appropriate alive/dead base into eax
-	movl base_pic, %eax
+	movl $base_pic, %eax
 	testl $0x000000FF, base_alive
 	jnz show_first_base_alive
-	movl dead_base_pic, %eax
+	movl $dead_base_pic, %eax
 	show_first_base_alive:
 
 	pushl %eax
@@ -268,10 +279,10 @@ draw_bases:
 	addl $8, %esp
 
 	# Put appropriate alive/dead base into eax
-	movl base_pic, %eax
+	movl $base_pic, %eax
 	testl $0x0000FF00, base_alive
 	jnz show_second_base_alive
-	movl dead_base_pic, %eax
+	movl $dead_base_pic, %eax
 	show_second_base_alive:
 
 	pushl %eax
@@ -280,10 +291,10 @@ draw_bases:
 	addl $8, %esp
 
 	# Put appropriate alive/dead base into eax
-	movl base_pic, %eax
+	movl $base_pic, %eax
 	testl $0x00FF0000, base_alive
 	jnz show_third_base_alive
-	movl dead_base_pic, %eax
+	movl $dead_base_pic, %eax
 	show_third_base_alive:
 
 	pushl %eax
@@ -291,6 +302,33 @@ draw_bases:
 	call draw_base
 	addl $8, %esp
 
+	leave
+	ret
+
+# void draw_base(int start, char* str_ptr)
+# Draws a 5-character base starting at a text-video offset
+# Inputs    : video int-offset
+# Outputs   : pointer to beginning of string
+# Registers : Standard C calling convention
+draw_base:
+	pushl %ebp
+	movl %esp, %ebp
+
+	movl 8(%ebp), %eax		# Storing int offset
+	xorl %edx, %edx 			# Counter
+	draw_base_loop:
+		cmpl $5, %edx				# If we've done 5, we're done
+		jge exit_base_loop
+
+		movl 12(%ebp), %ecx   				# Load pointer
+		movb (%ecx, %edx, 1), %cl			# Get correct char from string
+		call mp1_poke									# Draw
+
+		addl $2, %eax 			# Increase offset by 2 bytes, to next square
+		incl %edx
+		jmp draw_base_loop	# Reset
+
+	exit_base_loop:
 	leave
 	ret
 
@@ -328,39 +366,12 @@ get_missile_location:
 	movl 8(%ebp), %ecx								# Load argument
 	movl Y(%ecx), %eax								# Load y value
 	shrl $16, %eax										# 16 right to get high bytes
-	imull $COLUMNS, %eax 									# 80 columns (done with y)
-	addl X(%ecx), %edx								# Load x value into another register
+	imull $COLUMNS, %eax 							# 80 columns (done with y)
+	movl X(%ecx), %edx								# Load x value into another register
 	shrl $16, %edx										# 16 right to get high bytes
 	addl %edx, %eax										# Add x component
 	shll $1, %eax 										# Multiply by 2 because 2 bytes per elem
 
-	leave
-	ret
-
-# void draw_base(int start, char* str_ptr)
-# Draws a 5-character base starting at a text-video offset
-# Inputs    : video int-offset
-# Outputs   : pointer to beginning of string
-# Registers : Standard C calling convention
-draw_base:
-	pushl %ebp
-	movl %esp, %ebp
-
-	movl 8(%ebp), %eax		# Storing int offset
-	xorl %edx, %edx 			# Counter
-	draw_base_loop:
-		cmpl $5, %edx				# If we've done 5, we're done
-		jge exit_base_loop
-
-		movl 12(%ebp), %ecx   				# Load pointer
-		movb (%ecx, %edx, 1), %cl			# Get correct char from string
-		call mp1_poke									# Draw
-
-		addl $2, %eax 			# Increase offset by 2 bytes, to next square
-		incl %edx
-		jmp draw_base_loop	# Reset
-
-	exit_base_loop:
 	leave
 	ret
 
@@ -371,7 +382,7 @@ draw_base:
 # Outputs    : pointer to next missile
 # Registers  : Standard C calling convention
 mp1_missile_remove:
-	push %ebp
+	pushl %ebp
 	movl %esp, %ebp
 
 	# Keep previous as ecx, cur as eax, to_remove as edx
@@ -397,10 +408,8 @@ mp1_missile_remove:
 		movl %eax, %ecx
 		movl NEXT(%eax), %eax
 		cmpl %edx, %eax
-		je mp1_missile_remove_finish
-		jmp mp1_missile_remove_walk
+		jne mp1_missile_remove_walk 		# We haven't found it yet, keep going
 
-	mp1_missile_remove_finish:
 	# Connect the list across the one to be removed
 	movl NEXT(%eax), %edx 		# edx now holds pointer to next missile
 	movl %edx, NEXT(%ecx)
@@ -511,7 +520,7 @@ mp1_ioctl_movexhairs:
 	movl $X_MAX, crosshairs_x
 	x_good_high:
 
-	movl 4(%esp), %eax  								# get packaged data (Y)
+	movl 8(%esp), %eax  								# get packaged data (Y)
 	shrl $16, %eax											# Unpack (move high to low)
 	addl %eax, crosshairs_y							# Add data to crosshairs
 	andl $0x0000FFFF, crosshairs_y			# Ensure we're just dealing with low bits
@@ -604,18 +613,14 @@ mp1_ioctl_endgame:
 	pushl %ebp
 	movl %esp, %ebp
 
-	movl mp1_missile_list, %eax
-	movl $0, mp1_missile_list				# Detach head, now walk down eax and remove
-
 	delete_missile_loop:
-		cmpl $0, %eax
+		movl mp1_missile_list, %eax 	# Get head
+		cmpl $0, %eax									# Check if its null (done)
 		je end_delete_missile_loop
 
-		movl NEXT(%eax), %ecx			# Save the next missile in ecx
 		pushl %eax
-		call mp1_free
+		call mp1_missile_remove
 		addl $4, %esp 						# pop
-		movl %ecx, %eax						# Put the next missile in eax for next loop
 
 	end_delete_missile_loop:
 
