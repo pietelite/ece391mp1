@@ -36,9 +36,9 @@
 	ROWS = 25 						# Total row count
 
 	# The start text-video offset of all bases
-	FIRST_BASE = 3716
-	SECOND_BASE = 3756
-	THIRD_BASE = 3796
+	FIRST_BASE = 3876
+	SECOND_BASE = 3916
+	THIRD_BASE = 3956
 
 # Data shared between this file and rtc.c helper functions
 
@@ -138,7 +138,7 @@ update_missiles:
 
 	# Build stack frame
 	pushl %ebp
-	movl %ebp, %esp
+	movl %esp, %ebp
 
 	movl mp1_missile_list, %edx  	# hold "current" missile in ecx
 
@@ -159,15 +159,13 @@ update_missiles:
 		popl %edx
 
 		cmpl $0, EXPLODED(%edx)		# Are we exploding?
-		jne skip_update_xy 				# Jump if not 0, because we're exploding
+		jne update_missile_exploding		# Jump if not 0, because we're exploding
 
 		# Not exploding
 		movl VX(%edx), %eax				# Move velocity
 		addl %eax, X(%edx)				# Add to x component
 		movl VY(%edx), %eax				# Same with y
 		addl %eax, Y(%edx)
-
-		skip_update_xy:
 
 		# Three cases processing...
 		# 1. If moved out of range call mp1_missile_remove
@@ -196,6 +194,7 @@ update_missiles:
 		cmpl %eax, DEST_Y(%edx)			# If these aren't equal, we're not there
 		jne not_at_destination
 
+		update_missile_exploding:
 		# 	We're there! Call missile_explode with a pointer to the missile
 		#   struct as an argument
 		pushl %edx
@@ -418,9 +417,11 @@ mp1_missile_remove:
 	# Connect the list across the one to be removed
 	movl NEXT(%eax), %edx 		# edx now holds pointer to next missile
 	movl %edx, NEXT(%ecx)
+	pushl %edx 			# Preserve edx
 	pushl %eax
 	call mp1_free
 	popl %eax
+	popl %edx
 	movl %edx, %eax 					# return pointer to next missile
 
 	leave
@@ -436,7 +437,7 @@ mp1_ioctl_startgame:
 	movl %esp, %ebp
 	# Initialize all variables
 	movl $0, mp1_missile_list
-	movl $0, base_alive
+	movl $0x00010101, base_alive
 	movl $0, mp1_score
 	movl $40, crosshairs_x
 	movl $12, crosshairs_y
@@ -553,20 +554,23 @@ mp1_ioctl_getstatus:
 	movl %esp, %ebp
 
 	movl mp1_score, %ecx
-
+	
+	movl base_alive, %eax
 	# Add bases
-	testl $0x000000FF, base_alive
-	jle dead_first
+	testl $0x000000FF, %eax
+	jz dead_first
 	addl $0x00010000, %ecx					# First is alive -> add first bit of high 16
 	dead_first:
-	testl $0x0000FF00, base_alive
-	jle dead_second
+	testl $0x0000FF00, %eax
+	jz dead_second
 	addl $0x00020000, %ecx					# Second is alive -> add second bit of high 16
 	dead_second:
-	testl $0x00FF0000, base_alive
-	jle dead_third
+	testl $0x00FF0000, %eax
+	jz dead_third
 	addl $0x00040000, %ecx					# Third is alive -> add third bit of high 16
 	dead_third:
+
+	pushl %ecx  		# Save return data
 
 	# Need to allocate memory to store getstatus
 	pushl $STATUS_SIZE							# It takes three bytes to store status info
@@ -576,6 +580,7 @@ mp1_ioctl_getstatus:
 	je getstatus_fail
 
 	# Put the data in buffer location
+	popl %ecx 		# Get return data
 	movl %ecx, (%eax)
 
 	# Copy to user space
